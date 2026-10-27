@@ -16,7 +16,7 @@ subjectResults = struct( ...
 trialCountsPerSubjectAndBin = zeros(subjectCount, 4);
 
 for subjectIndex = 1:subjectCount
-    % Here we do ...; this workflow aligns with ... citation ...
+    % Processing order follows Luck, "Order of processing steps", https://erpinfo.org/order-of-steps
 
     subjectId = manifest(subjectIndex).id;
     subjectFile = manifest(subjectIndex).file;
@@ -31,10 +31,13 @@ for subjectIndex = 1:subjectCount
 
     subjectEEG = excludeItems(subjectEEG, itemsToExclude);
 
+    % Luck step 1: high-pass filter the continuous data
     subjectEEG = doHighPassFilter(subjectEEG);
 
+    % Luck step 3: re-reference
     subjectEEG = doMastoidReferencing(subjectEEG);
 
+    % Luck step 4: epoch the continuous data (no baseline correction)
     epochedEEG = doEpoching(subjectEEG);
 
     % Now that we have the epochs, we can free subjectEEG
@@ -43,6 +46,7 @@ for subjectIndex = 1:subjectCount
     epochCount = epochedEEG.trials;
     sampleTimePoints = epochedEEG.times;
 
+    % Luck step 5: artifact rejection on the epoched data
     [ptpRejected, maskedChannels] = doPeakToPeakRejection(epochedEEG);
     rejectedEpochs = doStepRejection(epochedEEG) | ptpRejected;
     butterflyLog('  rejected %d of %d epochs (%.1f%%)', sum(rejectedEpochs), epochCount, 100 * sum(rejectedEpochs) / epochCount);
@@ -86,6 +90,7 @@ usedSubjects = find(~dropSubject);
 usedCount = numel(usedSubjects);
 butterflyLog('  grand average over %d of %d subjects; minimum trials in any used subject x bin: %d', usedCount, subjectCount, min(min(trialCountsPerSubjectAndBin(usedSubjects, :))));
 
+% Luck step 6: average the single-trial epochs into single-subject ERP waveforms
 sampleCount = numel(sampleTimePoints);
 subjectMeans = zeros(4, sampleCount, usedCount);
 for usedIndex = 1:usedCount
@@ -96,8 +101,10 @@ for usedIndex = 1:usedCount
         subjectMeans(binIndex, :, usedIndex) = mean(data(bins == binIndex, :), 1);
     end
 end
+% Luck step 10: grand average across subjects
 grandAverage = mean(subjectMeans, 3);
 
+% Luck step 8: difference waves
 % Calculate the difference waves
 differenceWaves = [grandAverage(2, :) - grandAverage(1, :); grandAverage(4, :) - grandAverage(3, :)];
 
