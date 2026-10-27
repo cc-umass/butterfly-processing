@@ -43,13 +43,16 @@ for subjectIndex = 1:subjectCount
     epochCount = epochedEEG.trials;
     sampleTimePoints = epochedEEG.times;
 
-    rejectedEpochs = doStepRejection(epochedEEG) | doPeakToPeakRejection(epochedEEG);
+    [ptpRejected, maskedChannels] = doPeakToPeakRejection(epochedEEG);
+    rejectedEpochs = doStepRejection(epochedEEG) | ptpRejected;
     butterflyLog('  rejected %d of %d epochs (%.1f%%)', sum(rejectedEpochs), epochCount, 100 * sum(rejectedEpochs) / epochCount);
 
     epochedEEG = doLowPassFilter(epochedEEG);
 
-    % Extract data for just the ROI channels
-    roiIndices = cellfun(@(label) find(strcmpi(channels, label), 1), roiChannels);
+    % Extract data for just the ROI channels that are not masked for this subject
+    usedRoiChannels = setdiff(upper(roiChannels), upper(maskedChannels), 'stable');
+    butterflyLog('  ROI channels used %d of %d', numel(usedRoiChannels), numel(roiChannels));
+    roiIndices = cellfun(@(label) find(strcmpi(channels, label), 1), usedRoiChannels);
     roiData = squeeze(mean(epochedEEG.data(roiIndices, :, :), 1))';
 
     % Bin number 1-4 of every epoch

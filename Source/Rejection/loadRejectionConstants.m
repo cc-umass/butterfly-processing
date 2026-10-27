@@ -17,3 +17,6 @@ stepStepMs = 50;
 ptpThresholdUv = 100;
 ptpWindowMs = 200;
 ptpStepMs = 100;
+
+% A scalp channel flagged by the peak-to-peak test on more than this fraction of epochs is masked for the subject
+badChannelFlagFraction = 0.5;
