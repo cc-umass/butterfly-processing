@@ -3,4 +3,4 @@ binNames = {'readjust-high', 'readjust-low', 'no-readjust-high', 'no-readjust-lo
 binCodes = [201 202 203 204];
 
 % Functions we need to make sure EEGLab makes available
-requiredFunctions = {'pop_basicfilter', 'pop_loadcurry'};
+requiredFunctions = {'pop_basicfilter', 'pop_loadcurry', 'pop_runica', 'pop_iclabel'};

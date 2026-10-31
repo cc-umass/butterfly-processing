@@ -1,6 +1,7 @@
 function minimal()
 
 globals;
+loadEpochingConstants;
 initialize();
 
 manifest = loadManifest();
@@ -37,8 +38,14 @@ for subjectIndex = 1:subjectCount
     % Luck step 3: re-reference
     subjectEEG = doMastoidReferencing(subjectEEG);
 
-    % Luck step 4: epoch the continuous data (no baseline correction)
+    % Luck step 4: epoch the continuous data
     epochedEEG = doEpoching(subjectEEG);
+    % Apply baseline correction
+    epochedEEG = pop_rmbase(epochedEEG, baselineWindowMs);
+
+    % Attempt to remove eye-based artifacts using ICA. Luck step 2 applies ICA to the continuous data
+    % before epoching. Instead, we train it on the epochs, resulting in a faster process.
+    epochedEEG = doICACleaning(subjectEEG, epochedEEG);
 
     % Now that we have the epochs, we can free subjectEEG
     clear subjectEEG
@@ -46,18 +53,22 @@ for subjectIndex = 1:subjectCount
     epochCount = epochedEEG.trials;
     sampleTimePoints = epochedEEG.times;
 
-    % Luck step 5: artifact rejection on the epoched data
-    [ptpRejected, maskedChannels] = doPeakToPeakRejection(epochedEEG);
-    rejectedEpochs = doStepRejection(epochedEEG) | ptpRejected;
-    butterflyLog('  rejected %d of %d epochs (%.1f%%)', sum(rejectedEpochs), epochCount, 100 * sum(rejectedEpochs) / epochCount);
+    % Reject data, at the granularity of a single channel in a single epoch, that seem noisy
+    % or contaminated by artifacts, using the Autoreject package (Jas et al. 2017). This departs
+    % from Luck step 5, which rejects whole epochs. However, this is only an exploratory study.
+    badChannelEpochs = getAutorejectMask(epochedEEG, subjectId);
 
     epochedEEG = doLowPassFilter(epochedEEG);
 
-    % Extract data for just the ROI channels that are not masked for this subject
-    usedRoiChannels = setdiff(upper(roiChannels), upper(maskedChannels), 'stable');
-    butterflyLog('  ROI channels used %d of %d', numel(usedRoiChannels), numel(roiChannels));
-    roiIndices = cellfun(@(label) find(strcmpi(channels, label), 1), usedRoiChannels);
-    roiData = squeeze(mean(epochedEEG.data(roiIndices, :, :), 1))';
+    % Average the ROI channels that were not rejected in each epoch, so each epoch may use a different subset of channels
+    roiIndices = cellfun(@(label) find(strcmpi(channels, label), 1), roiChannels);
+    roiData = nan(epochCount, numel(sampleTimePoints));
+    for epochIndex = 1:epochCount
+        usableROIIndices = roiIndices(~badChannelEpochs(roiIndices, epochIndex));
+        if ~isempty(usableROIIndices)
+            roiData(epochIndex, :) = mean(double(epochedEEG.data(usableROIIndices, :, epochIndex)), 1);
+        end
+    end
 
     % Bin number 1-4 of every epoch
     epochBins = zeros(1, epochCount);
@@ -65,8 +76,8 @@ for subjectIndex = 1:subjectCount
         epochBins(epochIndex) = getEpochBin(epochedEEG, epochIndex);
     end
 
-    % Keep an epoch when neither rejection test flagged it and its ROI data samples are all finite
-    keepEpoch = ~rejectedEpochs & all(isfinite(roiData), 2)';
+    % Keep an epoch when its ROI mean has at least one usable channel at every sample
+    keepEpoch = all(isfinite(roiData), 2)';
 
     subjectResults(subjectIndex).bins = epochBins(keepEpoch);
     subjectResults(subjectIndex).data = roiData(keepEpoch, :);

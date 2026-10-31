@@ -2,7 +2,7 @@
 % Directories
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-rootDir = 'D:\butterfly-processing';
+rootDir = fileparts(fileparts(mfilename('fullpath')));
 eeglabDir = 'C:\Users\ccooley\eeglab2026.0.0';
 
 buildDir = fullfile(rootDir, 'Build');

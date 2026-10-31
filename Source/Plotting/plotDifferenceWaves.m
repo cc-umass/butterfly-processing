@@ -3,6 +3,7 @@ function plotDifferenceWaves(differenceWaves, sampleTimePoints, usedCount)
 globals;
 loadFilteringConstants;
 loadRejectionConstants;
+loadICAConstants;
 
 waveColors = [0.45 0 0.6; 0 0.45 0.7];
 waveNames = {'GA bin5 (RL-RH)', 'GA bin6 (NL-NH)'};
@@ -31,8 +32,8 @@ ylim(axisHandle, yLimits);
 xlabel(axisHandle, 'ms');
 ylabel(axisHandle, '\muV');
 legend(axisHandle, lineHandles, waveNames, 'Location', 'northwest');
-title(axisHandle, sprintf('minimal.m: %s GA bin5 and bin6, 0.1-40 Hz, no baseline, n=%d', roiName, usedCount), 'FontWeight', 'bold', 'FontSize', 14, 'Interpreter', 'none');
-subtitle(axisHandle, sprintf('Whole-epoch rejection: VEOG/HEOG step %g/%g uV, scalp ptp %g uV. 40 Hz LP Butterworth order %d on trials.', stepThresholdVeogUv, stepThresholdHeogUv, ptpThresholdUv, lowPassOrder), 'FontSize', 9, 'Interpreter', 'none');
+title(axisHandle, sprintf('minimal.m: %s GA bin5 and bin6, 0.1-40 Hz, baseline -100..0, n=%d', roiName, usedCount), 'FontWeight', 'bold', 'FontSize', 14, 'Interpreter', 'none');
+subtitle(axisHandle, sprintf('Eye-only ICA (ICLabel Eye > %.1f, seeded); Autoreject channel x epoch labels mask the ROI mean. 40 Hz LP Butterworth order %d on trials.', eyeProbabilityMin, lowPassOrder), 'FontSize', 9, 'Interpreter', 'none');
 exportgraphics(figureHandle, figureFile, 'Resolution', figureDpi);
 close(figureHandle);
 butterflyLog('FIGURE: %s', figureFile);
