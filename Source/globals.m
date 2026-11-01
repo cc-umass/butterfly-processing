@@ -33,5 +33,5 @@ minimumTrialsPerBin = 1;
 
 peripheralChannels = {'VEOG', 'HEOG', 'EKG', 'EMG', 'TRIGGER'};
 mastoidChannels = {'M1', 'M2'};
-roiName = 'FC';
-roiChannels = {'F3', 'FZ', 'F4', 'FC3', 'FCZ', 'FC4', 'C3', 'CZ', 'C4'};
+roiName = 'CP';
+roiChannels = {'CPZ', 'PZ', 'CP3', 'CP4', 'P3', 'P4'};
