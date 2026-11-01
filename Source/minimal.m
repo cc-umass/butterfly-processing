@@ -5,7 +5,8 @@ loadEpochingConstants;
 initialize();
 
 manifest = loadManifest();
-subjectCount = numel(manifest);
+subjects = manifest.Subjects;
+subjectCount = numel(subjects);
 
 subjectResults = struct( ...
     ... % Bin number 1-4 of each kept trial, as a row vector with one value per kept trial
@@ -19,9 +20,9 @@ trialCountsPerSubjectAndBin = zeros(subjectCount, 4);
 for subjectIndex = 1:subjectCount
     % Processing order follows Luck, "Order of processing steps", https://erpinfo.org/order-of-steps
 
-    subjectId = manifest(subjectIndex).id;
-    subjectFile = manifest(subjectIndex).file;
-    itemsToExclude = manifest(subjectIndex).excludedItems;
+    subjectId = subjects(subjectIndex).id;
+    subjectFile = subjects(subjectIndex).file;
+    itemsToExclude = subjects(subjectIndex).excludedItems;
     butterflyLog('================ %s (%s) ================', subjectId, subjectFile);
 
     subjectEEG = pop_loadcurry(subjectFile);
@@ -53,15 +54,20 @@ for subjectIndex = 1:subjectCount
     epochCount = epochedEEG.trials;
     sampleTimePoints = epochedEEG.times;
 
-    % Reject data, at the granularity of a single channel in a single epoch, that seem noisy
-    % or contaminated by artifacts, using the Autoreject package (Jas et al. 2017). This departs
-    % from Luck step 5, which rejects whole epochs. However, this is only an exploratory study.
+    % Find data that seem noisy or contaminated by artifacts, using the Autoreject package (Jas et al. 2017),
+    % which rejects single channels in single epochs. The manifest's RejectionStrategy decides what is rejected:
+    % ChannelInEpoch drops only the rejected channel from that epoch's ROI mean, which departs from Luck step 5.
+    % WholeEpoch rejects an epoch when any ROI channel is rejected, as Luck step 5 does.
+    roiIndices = cellfun(@(label) find(strcmpi(channels, label), 1), roiChannels);
     badChannelEpochs = getAutorejectMask(epochedEEG, subjectId);
+    if strcmp(manifest.RejectionStrategy, 'WholeEpoch')
+        badEpochs = any(badChannelEpochs(roiIndices, :), 1);
+        badChannelEpochs(:, badEpochs) = true;
+    end
 
     epochedEEG = doLowPassFilter(epochedEEG);
 
     % Average the ROI channels that were not rejected in each epoch, so each epoch may use a different subset of channels
-    roiIndices = cellfun(@(label) find(strcmpi(channels, label), 1), roiChannels);
     roiData = nan(epochCount, numel(sampleTimePoints));
     for epochIndex = 1:epochCount
         usableROIIndices = roiIndices(~badChannelEpochs(roiIndices, epochIndex));
@@ -90,11 +96,11 @@ end
 
 butterflyLog('================ cohort n=%d ================', subjectCount);
 for subjectIndex = 1:subjectCount
-    butterflyLog('  %-4s per bin %s total %d', manifest(subjectIndex).id, mat2str(trialCountsPerSubjectAndBin(subjectIndex, :)), sum(trialCountsPerSubjectAndBin(subjectIndex, :)));
+    butterflyLog('  %-4s per bin %s total %d', subjects(subjectIndex).id, mat2str(trialCountsPerSubjectAndBin(subjectIndex, :)), sum(trialCountsPerSubjectAndBin(subjectIndex, :)));
 end
 dropSubject = any(trialCountsPerSubjectAndBin < minimumTrialsPerBin, 2)';
 for subjectIndex = find(dropSubject)
-    butterflyLog('  WARNING: %s has a bin with fewer than %d trials %s and is dropped from the grand average', manifest(subjectIndex).id, minimumTrialsPerBin, mat2str(trialCountsPerSubjectAndBin(subjectIndex, :)));
+    butterflyLog('  WARNING: %s has a bin with fewer than %d trials %s and is dropped from the grand average', subjects(subjectIndex).id, minimumTrialsPerBin, mat2str(trialCountsPerSubjectAndBin(subjectIndex, :)));
 end
 
 usedSubjects = find(~dropSubject);

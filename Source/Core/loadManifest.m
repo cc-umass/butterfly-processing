@@ -3,13 +3,15 @@ function manifest = loadManifest()
 globals;
 
 manifest = jsondecode(fileread(manifestFile));
-subjectCount = numel(manifest);
-for subjectIndex = 1:subjectCount
-    items = manifest(subjectIndex).excludedItems(:)';
-    assert(all(items == round(items)) && all(items >= 1 & items <= 120), '%s: excludedItems must be integers 1-120', manifest(subjectIndex).id);
-    assert(numel(unique(items)) == numel(items), '%s: duplicate excludedItems', manifest(subjectIndex).id);
-    manifest(subjectIndex).excludedItems = items;
+if ~any(strcmp(manifest.RejectionStrategy, {'ChannelInEpoch', 'WholeEpoch'}))
+    error('RejectionStrategy must be ChannelInEpoch or WholeEpoch, not %s', manifest.RejectionStrategy);
 end
-assert(numel(unique({manifest.id})) == subjectCount, 'duplicate ids in manifest');
-butterflyLog('%d subjects: %s', subjectCount, strjoin({manifest.id}, ' '));
+
+subjectCount = numel(manifest.Subjects);
+for subjectIndex = 1:subjectCount
+    items = manifest.Subjects(subjectIndex).excludedItems(:);
+    manifest.Subjects(subjectIndex).excludedItems = items;
+end
+
+butterflyLog('%d subjects: %s; rejection strategy %s', subjectCount, strjoin({manifest.Subjects.id}, ' '), manifest.RejectionStrategy);
 end
