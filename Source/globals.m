@@ -41,6 +41,7 @@ sectionPaddingSeconds = 3;
 
 peripheralChannels = {'VEOG', 'HEOG', 'EKG', 'EMG', 'TRIGGER'};
 mastoidChannels = {'M1', 'M2'};
+excludeSubjectsWithBadMastoid = false;
 roiName = 'CP';
 roiChannels = {'CPZ', 'PZ', 'CP3', 'CP4', 'P3', 'P4'};
 electrodeLabels = {'F3', 'FZ', 'F4', 'C3', 'CZ', 'C4', 'P3', 'PZ', 'P4'};

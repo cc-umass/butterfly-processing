@@ -29,7 +29,7 @@ for subjectIndex = 1:subjectCount
 
     sections = findSectionBadChannels(subjectEEG, subjectId, subjectFile);
     mastoidIndices = find(ismember(upper(channels), mastoidChannels));
-    if any(sections.badChannels(mastoidIndices, :), 'all')
+    if excludeSubjectsWithBadMastoid && any(sections.badChannels(mastoidIndices, :), 'all')
         butterflyLog('  EXCLUDED: mastoid bad in a section');
         result = struct('excluded', true, 'sections', sections);
         save(resultFile, '-struct', 'result');
