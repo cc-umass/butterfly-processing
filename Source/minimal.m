@@ -5,17 +5,8 @@ loadEpochingConstants;
 initialize();
 
 manifest = loadManifest();
-subjects = manifest.Subjects;
+subjects = selectSubjects(manifest.Subjects);
 subjectCount = numel(subjects);
-
-subjectResults = struct( ...
-    ... % Bin number 1-4 of each kept trial, as a row vector with one value per kept trial
-    'bins', cell(1, subjectCount), ...
-    ... % ROI-average waveform of each kept trial, as a matrix with one row per kept trial and one column per time sample
-    'data', []);
-
-% Number of kept trials for each subject and bin, as a matrix with one row per subject and one column per bin
-trialCountsPerSubjectAndBin = zeros(subjectCount, 4);
 
 for subjectIndex = 1:subjectCount
     % Processing order follows Luck, "Order of processing steps", https://erpinfo.org/order-of-steps
@@ -23,6 +14,11 @@ for subjectIndex = 1:subjectCount
     subjectId = subjects(subjectIndex).id;
     subjectFile = subjects(subjectIndex).file;
     itemsToExclude = subjects(subjectIndex).excludedItems;
+    resultFile = fullfile(intermediateDir, [subjectId '_result.mat']);
+    if exist(resultFile, 'file')
+        butterflyLog('================ %s: result cached ================', subjectId);
+        continue
+    end
     butterflyLog('================ %s (%s) ================', subjectId, subjectFile);
 
     subjectEEG = pop_loadcurry(subjectFile);
@@ -30,6 +26,16 @@ for subjectIndex = 1:subjectCount
     butterflyLog('  loaded: %d ch, %g Hz, %d pnts (%.1f min), %d events', subjectEEG.nbchan, subjectEEG.srate, subjectEEG.pnts, subjectEEG.pnts / subjectEEG.srate / 60, numel(subjectEEG.event));
 
     subjectEEG = sanitizeEvents(subjectEEG);
+
+    sections = findSectionBadChannels(subjectEEG, subjectId, subjectFile);
+    mastoidIndices = find(ismember(upper(channels), mastoidChannels));
+    if any(sections.badChannels(mastoidIndices, :), 'all')
+        butterflyLog('  EXCLUDED: mastoid bad in a section');
+        result = struct('excluded', true, 'sections', sections);
+        save(resultFile, '-struct', 'result');
+        clear subjectEEG
+        continue
+    end
 
     subjectEEG = excludeItems(subjectEEG, itemsToExclude);
 
@@ -44,89 +50,45 @@ for subjectIndex = 1:subjectCount
     % Apply baseline correction
     epochedEEG = pop_rmbase(epochedEEG, baselineWindowMs);
 
-    % Attempt to remove eye-based artifacts using ICA. Luck step 2 applies ICA to the continuous data
-    % before epoching. Instead, we train it on the epochs, resulting in a faster process.
-    epochedEEG = doICACleaning(subjectEEG, epochedEEG);
+    epochSection = getEpochSections(subjectEEG, epochedEEG, sections, itemsToExclude);
 
-    % Now that we have the epochs, we can free subjectEEG
+    icaExcludedChannels = find(any(sections.badChannels, 2))';
+    [epochedEEG, icaInfo] = doICACleaning(subjectEEG, epochedEEG, icaExcludedChannels);
+
     clear subjectEEG
 
-    epochCount = epochedEEG.trials;
-    sampleTimePoints = epochedEEG.times;
-
-    % Find data that seem noisy or contaminated by artifacts, using the Autoreject package (Jas et al. 2017),
-    % which rejects single channels in single epochs. The manifest's RejectionStrategy decides what is rejected:
-    % ChannelInEpoch drops only the rejected channel from that epoch's ROI mean, which departs from Luck step 5.
-    % WholeEpoch rejects an epoch when any ROI channel is rejected, as Luck step 5 does.
-    roiIndices = cellfun(@(label) find(strcmpi(channels, label), 1), roiChannels);
-    badChannelEpochs = getAutorejectMask(epochedEEG, subjectId);
-    if strcmp(manifest.RejectionStrategy, 'WholeEpoch')
-        badEpochs = any(badChannelEpochs(roiIndices, :), 1);
-        badChannelEpochs(:, badEpochs) = true;
-    end
+    rejectionEEG = interpolateSectionBadCells(epochedEEG, sections.badChannels, epochSection);
+    badChannelEpochs = getAutorejectMask(rejectionEEG, subjectId);
+    clear rejectionEEG
 
     epochedEEG = doLowPassFilter(epochedEEG);
 
-    % Average the ROI channels that were not rejected in each epoch, so each epoch may use a different subset of channels
-    roiData = nan(epochCount, numel(sampleTimePoints));
-    for epochIndex = 1:epochCount
-        usableROIIndices = roiIndices(~badChannelEpochs(roiIndices, epochIndex));
-        if ~isempty(usableROIIndices)
-            roiData(epochIndex, :) = mean(double(epochedEEG.data(usableROIIndices, :, epochIndex)), 1);
-        end
-    end
-
-    % Bin number 1-4 of every epoch
+    epochCount = epochedEEG.trials;
     epochBins = zeros(1, epochCount);
     for epochIndex = 1:epochCount
         epochBins(epochIndex) = getEpochBin(epochedEEG, epochIndex);
     end
 
-    % Keep an epoch when its ROI mean has at least one usable channel at every sample
-    keepEpoch = all(isfinite(roiData), 2)';
+    keptLabels = unique([roiChannels electrodeLabels], 'stable');
+    keptIndices = cellfun(@(label) find(strcmpi(channels, label), 1), keptLabels);
 
-    subjectResults(subjectIndex).bins = epochBins(keepEpoch);
-    subjectResults(subjectIndex).data = roiData(keepEpoch, :);
-    trialCountsPerSubjectAndBin(subjectIndex, :) = histcounts(epochBins(keepEpoch), 1:5);
-    butterflyLog('  trials kept %d of %d, per bin %s', sum(keepEpoch), epochCount, mat2str(trialCountsPerSubjectAndBin(subjectIndex, :)));
+    result = struct();
+    result.excluded = false;
+    result.sections = sections;
+    result.channelLabels = keptLabels;
+    result.bins = epochBins;
+    result.epochSection = epochSection;
+    result.data = single(epochedEEG.data(keptIndices, :, :));
+    result.badCells = badChannelEpochs(keptIndices, :);
+    result.sectionBad = sections.badChannels(keptIndices, :);
+    result.sampleTimePoints = epochedEEG.times;
+    result.icaInfo = icaInfo;
+    save(resultFile, '-struct', 'result');
+    butterflyLog('  epochs %d; Autoreject cells bad on kept channels %.1f%%', epochCount, 100 * mean(result.badCells, 'all'));
     butterflyLog('  %s done', subjectId);
     butterflyLog('');
     clear epochedEEG
 end
 
-butterflyLog('================ cohort n=%d ================', subjectCount);
-for subjectIndex = 1:subjectCount
-    butterflyLog('  %-4s per bin %s total %d', subjects(subjectIndex).id, mat2str(trialCountsPerSubjectAndBin(subjectIndex, :)), sum(trialCountsPerSubjectAndBin(subjectIndex, :)));
-end
-dropSubject = any(trialCountsPerSubjectAndBin < minimumTrialsPerBin, 2)';
-for subjectIndex = find(dropSubject)
-    butterflyLog('  WARNING: %s has a bin with fewer than %d trials %s and is dropped from the grand average', subjects(subjectIndex).id, minimumTrialsPerBin, mat2str(trialCountsPerSubjectAndBin(subjectIndex, :)));
-end
-
-usedSubjects = find(~dropSubject);
-usedCount = numel(usedSubjects);
-butterflyLog('  grand average over %d of %d subjects; minimum trials in any used subject x bin: %d', usedCount, subjectCount, min(min(trialCountsPerSubjectAndBin(usedSubjects, :))));
-
-% Luck step 6: average the single-trial epochs into single-subject ERP waveforms
-sampleCount = numel(sampleTimePoints);
-subjectMeans = zeros(4, sampleCount, usedCount);
-for usedIndex = 1:usedCount
-    subjectIndex = usedSubjects(usedIndex);
-    bins = subjectResults(subjectIndex).bins;
-    data = subjectResults(subjectIndex).data;
-    for binIndex = 1:4
-        subjectMeans(binIndex, :, usedIndex) = mean(data(bins == binIndex, :), 1);
-    end
-end
-% Luck step 10: grand average across subjects
-grandAverage = mean(subjectMeans, 3);
-
-% Luck step 8: difference waves
-% Calculate the difference waves
-differenceWaves = [grandAverage(2, :) - grandAverage(1, :); grandAverage(4, :) - grandAverage(3, :)];
-
-% Plot the difference waves
-plotDifferenceWaves(differenceWaves, sampleTimePoints, usedCount);
-
-butterflyLog('minimal.m done %s', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
+butterflyLog('minimal.m done %s', char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss')));
 end
